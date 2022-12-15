@@ -32,7 +32,7 @@ def ilqr(
     :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
     :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> z[t+1]
     :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals
-    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1]
+    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1]
     :param u_sat: Control saturation.
     :param du_sat: Slew rate.
     :param max_iter: Maximumum number of iLQR steps.
@@ -74,17 +74,17 @@ def iteration_lqr(
     # -- Linear expansion of model
     tF_linear = jax.vmap(linear_model_fn)(tz_guess[:-1])
     # -- Quadratic expansion of cost about tz_guess
-    tH_cost, tJ_cost = approx_cost(tz_guess[:-1])
+    tH_cost, tj_cost = approx_cost(tz_guess[:-1])
 
     # 2. Backward pass
     prob = BoxCDQP()
     fwd = jnp.zeros(n_ctrl)
-    V_x = tJ_cost[-1, :n_state]
+    V_x = tj_cost[-1, :n_state]
     V_xx = tH_cost[-1, :n_state, :n_state]
     # -- Run scan backward TODO: search mu?
     _, feeds = jax.lax.scan(jax.tree_util.Partial(scan_backward, mu=1e-3, u_sat=u_sat, du_sat=du_sat, prob=prob),
                             (fwd, V_x, V_xx),
-                            (tu_guess, tJ_cost, tH_cost, tF_linear),
+                            (tu_guess, tj_cost, tH_cost, tF_linear),
                             reverse=True)
     feedforwards, Feedbacks, delta_V1s, delta_V2s = feeds
 

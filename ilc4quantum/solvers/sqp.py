@@ -82,7 +82,7 @@ def iteration_sqp(
     tF_linear = jax.vmap(linear_model_fn)(tz_guess[:-1])
 
     # Quadratic expansion of cost about tz_guess
-    tH_cost, tJ_cost = approx_cost(tz_guess[:-1])
+    tH_cost, tj_cost = approx_cost(tz_guess[:-1])
 
     # Solve QP
     tx_dx_opt, tu_dus_opt = quad_program(
@@ -92,7 +92,7 @@ def iteration_sqp(
         tF_lin=tF_linear,
         tr_feas=tr_feas,
         tH_cost=tH_cost,
-        tJ_cost=tJ_cost,
+        tj_cost=tj_cost,
         u_sat=u_sat,
         du_sat=du_sat
     )
@@ -148,7 +148,7 @@ def quad_program(
         tF_lin,
         tr_feas,
         tH_cost,
-        tJ_cost,
+        tj_cost,
         u_sat,
         du_sat):
     """
@@ -171,8 +171,8 @@ def quad_program(
     P_qp = block_diag(*tH_cost, tH_final) / 2  # sparse.BCOO.fromdense?
 
     # - linear objective: Jz
-    tJ_final = jnp.zeros_like(tJ_cost[-1, :n_state])
-    q_qp = jnp.hstack([tJ_cost.flatten(), tJ_final])
+    tJ_final = jnp.zeros_like(tj_cost[-1, :n_state])
+    q_qp = jnp.hstack([tj_cost.flatten(), tJ_final])
 
     # - initial condition: dxs[0] == x_init - xs_g[0]
     I_eq = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_horiz * (n_state + n_ctrl)))])
