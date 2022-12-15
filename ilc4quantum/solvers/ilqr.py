@@ -24,13 +24,12 @@ def ilqr(
 
     Notes:  1.  It is recommended to use 'jax_enable_x64' for iLQR.
             2.  TODO: Slew bounds not working?
-            3.  Is ILC just exchanging model_fn -> true_fn?
 
     :param x_init: Initial state
     :param tx_guess: Shape is (time, state)
     :param tu_guess: Shape is (time, control)
     :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
-    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> z[t+1]
+    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> A[t]
     :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals
     :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1]
     :param u_sat: Control saturation.

@@ -31,15 +31,14 @@ def sqp(
     :param x_init: Initial state
     :param tx_guess: Shape is (time, state)
     :param tu_guess: Shape is (time, control)
-    :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
-    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> z[t+1]
-    :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals
-    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1]
+    :param model_fn: Model dynamics. Mapping z[t] -> z[t+1].
+    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> A[t].
+    :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals.
+    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1].
     :param u_sat: Control saturation.
     :param du_sat: Slew rate.
     :param max_iter: Maximumum number of SQP steps.
     :return: The optimal trajectory, z[0:H]. A zero control is appended alongside the terminal state, z[H].
-    :return: 
     """
     local_iteration = jax.tree_util.Partial(iteration_sqp,
                                             **{'x_init': x_init,
