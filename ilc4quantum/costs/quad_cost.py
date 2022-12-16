@@ -23,7 +23,7 @@ def quad_cost_fn(tz, tz_ref, tH_cost, tj_cost, discount=1):
     return jnp.sum(zHz / 2 + jz, axis=0)
 
 
-def approx_quad_cost(tz_guess, tz_ref, tH_cost, tj_cost, discount=1):
+def quadraticize_quad_cost(tz_guess, tz_ref, tH_cost, tj_cost, discount=1):
     # Broadcast discount factors (time axis: 0)
     t_dfs = discount ** jnp.arange(len(tz_guess))
 

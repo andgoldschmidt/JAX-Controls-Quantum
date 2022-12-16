@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jaxopt import BoxCDQP
 
 
-ilqr_static_args = ['max_iter', 'model_fn', 'linear_model_fn', 'cost_fn', 'approx_cost']
+ilqr_static_args = ['max_iter', 'model_fn', 'linearize_model', 'cost_fn', 'quadraticize_cost']
 
 
 @functools.partial(jax.jit, static_argnames=ilqr_static_args)
@@ -13,9 +13,9 @@ def ilqr(
         tx_guess,
         tu_guess,
         model_fn,
-        linear_model_fn,
+        linearize_model,
         cost_fn,
-        approx_cost,
+        quadraticize_cost,
         u_sat,
         du_sat,
         max_iter):
@@ -29,9 +29,9 @@ def ilqr(
     :param tx_guess: Shape is (time, state)
     :param tu_guess: Shape is (time, control)
     :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
-    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> A[t]
+    :param linearize_model: Linearized model dynamics. Mapping z[t] -> A[t]
     :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals
-    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1]
+    :param quadraticize_cost: Quadraticized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1]
     :param u_sat: Control saturation.
     :param du_sat: Slew rate.
     :param max_iter: Maximumum number of iLQR steps.
@@ -40,9 +40,9 @@ def ilqr(
     local_iteration = jax.tree_util.Partial(iteration_lqr,
                                             **{'x_init': x_init,
                                                'model_fn': model_fn,
-                                               'linear_model_fn': linear_model_fn,
+                                               'linear_model_fn': linearize_model,
                                                'cost_fn': cost_fn,
-                                               'approx_cost': approx_cost,
+                                               'approx_cost': quadraticize_cost,
                                                'u_sat': u_sat,
                                                'du_sat': du_sat})
     (tx, tu), steps = jax.lax.scan(local_iteration, (tx_guess, tu_guess), None, length=max_iter)

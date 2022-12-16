@@ -10,10 +10,10 @@ def ilc(
         x_init,
         tu_guess,
         model_fn,
-        linear_model_fn,
+        linearize_model,
         true_fn,
         cost_fn,
-        approx_cost,
+        quadraticize_cost,
         max_iter,
         schedule,
         u_sat=jnp.inf,
@@ -27,10 +27,10 @@ def ilc(
     :param x_init: The inital state.
     :param tu_guess: The initial control (usually an optimal control assuming the model is true).
     :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
-    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> A[t].
+    :param linearize_model: Linearized model dynamics. Mapping z[t] -> A[t].
     :param true_fn: True model dynamics (rollout access only). Mapping z[t] -> z[t+1].
     :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals.
-    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1].
+    :param quadraticize_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1].
     :param max_iter: The number of learning control iterations.
     :param schedule: The maximum number of iterations for each solver call.
     :param u_sat: Control saturation.
@@ -67,9 +67,9 @@ def ilc(
             tx_guess,
             tu_guess,
             model_fn,
-            linear_model_fn,
+            linearize_model,
             cost_fn,
-            approx_cost,
+            quadraticize_cost,
             u_sat,
             du_sat,
             schedule[i],
@@ -85,7 +85,6 @@ def ilc(
 
         # Update control
         tu_guess = tz_opt[:-1, -n_ctrl:]
-
 
     return tz_opt[:, :n_state], tz_opt[:-1, -n_ctrl:], replay_buffer
 

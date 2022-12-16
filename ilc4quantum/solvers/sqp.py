@@ -1,13 +1,13 @@
 import functools
 import jax
+from jax.experimental import sparse
 import jax.numpy as jnp
 import jax.scipy.optimize as joptimize
 from jax.scipy.linalg import block_diag
 from jaxopt import BacktrackingLineSearch, BoxOSQP
 from scipy.optimize import line_search as sp_line_search
 
-
-sqp_static_args = ['max_iter', 'model_fn', 'linear_model_fn', 'cost_fn', 'approx_cost']
+sqp_static_args = ['max_iter', 'model_fn', 'linearize_model', 'cost_fn', 'quadraticize_cost']
 
 
 @functools.partial(jax.jit, static_argnames=sqp_static_args)
@@ -16,9 +16,9 @@ def sqp(
         tx_guess,
         tu_guess,
         model_fn,
-        linear_model_fn,
+        linearize_model,
         cost_fn,
-        approx_cost,
+        quadraticize_cost,
         u_sat,
         du_sat,
         max_iter):
@@ -32,9 +32,9 @@ def sqp(
     :param tx_guess: Shape is (time, state)
     :param tu_guess: Shape is (time, control)
     :param model_fn: Model dynamics. Mapping z[t] -> z[t+1].
-    :param linear_model_fn: Linearized model dynamics. Mapping z[t] -> A[t].
+    :param linearize_model: Linearized model dynamics. Mapping z[t] -> A[t].
     :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals.
-    :param approx_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1].
+    :param quadraticize_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1].
     :param u_sat: Control saturation.
     :param du_sat: Slew rate.
     :param max_iter: Maximumum number of SQP steps.
@@ -43,9 +43,9 @@ def sqp(
     local_iteration = jax.tree_util.Partial(iteration_sqp,
                                             **{'x_init': x_init,
                                                'model_fn': model_fn,
-                                               'linear_model_fn': linear_model_fn,
+                                               'linear_model_fn': linearize_model,
                                                'cost_fn': cost_fn,
-                                               'approx_cost': approx_cost,
+                                               'approx_cost': quadraticize_cost,
                                                'u_sat': u_sat,
                                                'du_sat': du_sat})
     # Scan
@@ -168,6 +168,7 @@ def quad_program(
     # - quadratic objective: (1/2)zHz
     tH_final = jnp.zeros_like(tH_cost[-1, :n_state, :n_state])
     P_qp = block_diag(*tH_cost, tH_final) / 2  # sparse.BCOO.fromdense?
+    nse_P_qp = n_horiz * (n_state + n_ctrl) ** 2 + n_state ** 2
 
     # - linear objective: Jz
     tJ_final = jnp.zeros_like(tj_cost[-1, :n_state])
@@ -175,6 +176,7 @@ def quad_program(
 
     # - initial condition: dxs[0] == x_init - xs_g[0]
     I_eq = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_horiz * (n_state + n_ctrl)))])
+    nse_I_eq = n_state
     lo_eq_init = x_init - tx_g[0]
     up_eq_init = lo_eq_init
 
@@ -182,11 +184,12 @@ def quad_program(
     # dxs[t+1] = S dzs[t]
     id_x = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_ctrl))])
     S_eq = jnp.hstack([jnp.zeros((n_horiz * n_state, n_state + n_ctrl)),
-                      block_diag(jnp.kron(jnp.eye(n_horiz - 1), id_x), jnp.eye(n_state))])
+                       block_diag(jnp.kron(jnp.eye(n_horiz - 1), id_x), jnp.eye(n_state))])
     # F dzs[t]
     F_eq = jnp.hstack([block_diag(*tF_lin), jnp.zeros((n_state * n_horiz, n_state))])
     # (S - F) dzs[t] := dxs[t+1] - F dzs[t]
     A_eq = S_eq - F_eq
+    nse_A_eq = n_horiz * (n_state + n_ctrl) ** 2 + n_state ** 2
     lo_eq = tr_feas.flatten()
     up_eq = lo_eq
 
@@ -206,6 +209,7 @@ def quad_program(
                         jnp.zeros((n_horiz * (n_state + n_ctrl), n_state))])
     lo_ineq = jnp.concatenate((x_min * jnp.ones((n_horiz, n_state)), tu_min), axis=1).flatten()
     up_ineq = jnp.concatenate((x_max * jnp.ones((n_horiz, n_state)), tu_max), axis=1).flatten()
+    nse_A_ineq = n_horiz * (n_state + n_ctrl)
 
     # - OSQP constraints
     A_qp = jnp.vstack([I_eq, A_eq, Aineq])  # sparse.BCOO.fromdense?
@@ -215,9 +219,16 @@ def quad_program(
     # - OSQP Solve
     # If required the algorithm can be sped up by setting check_primal_dual_infeasability to False,
     # and by setting eq_qp_preconditioner to "jacobi" (when possible).
-    prob = BoxOSQP()
-    params, state = prob.run(params_obj=(P_qp, q_qp), params_eq=A_qp, params_ineq=(lo_qp, up_qp))
+    prob = BoxOSQP(matvec_Q=sparse_matvec, matvec_A=sparse_matvec)
+    sp_P_qp = sparse.BCOO.fromdense(P_qp, nse=nse_P_qp)
+    sp_A_qp = sparse.BCOO.fromdense(A_qp, nse=nse_I_eq + nse_A_eq + nse_A_ineq)
+    params, state = prob.run(params_obj=(sp_P_qp, q_qp), params_eq=sp_A_qp, params_ineq=(lo_qp, up_qp))
 
     # params.primal[0] = [dx(0),du(0),dx(1),du(1),...,dx(H-1),du(H-1),dx(H)
     res = jnp.hstack([params.primal[0], jnp.zeros(n_ctrl)]).reshape(n_horiz + 1, n_state + n_ctrl)
     return res[:, :n_state], res[:-1, -n_ctrl:]
+
+
+@sparse.sparsify
+def sparse_matvec(M, v):
+    return M @ v
