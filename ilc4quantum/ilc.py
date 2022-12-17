@@ -2,8 +2,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 
-from .solvers.ilqr import ilqr
-from .solvers.sqp import sqp
+from .solvers import solver
 
 
 def ilc(
@@ -18,7 +17,7 @@ def ilc(
         schedule,
         u_sat=jnp.inf,
         du_sat=jnp.inf,
-        solver='iLQR'):
+        solver_name='iLQR'):
     """
     Iterative learning control (ILC) solves an optimal control problem using a standard control solver for planning. It assumes
     rollouts of the systems are accessible as a black box. In ILC, data from the rollouts are used to iteratively compute model
@@ -35,21 +34,13 @@ def ilc(
     :param schedule: The maximum number of iterations for each solver call.
     :param u_sat: Control saturation.
     :param du_sat: Slew rate.
-    :param solver: Either 'iLQR' or 'SQP'. Solver type for the optimal control problem.
+    :param solver_name: Either 'iLQR' or 'SQP'. Name of solver for the optimal control problem.
     :return: The optimal state of shape (horizon + 1, state), the optimal control of shape (horizon, state), the replay buffer
     """
     # Pay attention to shapes!
     n_horiz, n_ctrl = tu_guess
     n_state = len(x_init)
     max_iter = 1
-
-    # Select solver.
-    if solver == 'iLQR':
-        controller = ilqr
-    elif solver == 'SQP':
-        controller = sqp
-    else:
-        raise ValueError(f'Invalid solver {solver}. Value must be one of iLQR, SQP.')
 
     # Integrate true model along x_init using tu_guess
     rollout = jax.tree_util.Partial(solve_ivp, model_fn=true_fn)
@@ -62,7 +53,8 @@ def ilc(
         tx_guess = rollout(x_init, tu_guess)
 
         # Solve optimal control
-        tz_opt = controller(
+        tz_opt = solver(
+            solver_name,
             x_init,
             tx_guess,
             tu_guess,

@@ -1,58 +1,16 @@
-import functools
 import jax
 import jax.numpy as jnp
 from jaxopt import BoxCDQP
 
-
-ilqr_static_args = ['max_iter', 'model_fn', 'linearize_model', 'cost_fn', 'quadraticize_cost']
-
-
-@functools.partial(jax.jit, static_argnames=ilqr_static_args)
-def ilqr(
-        x_init,
-        tx_guess,
-        tu_guess,
-        model_fn,
-        linearize_model,
-        cost_fn,
-        quadraticize_cost,
-        u_sat,
-        du_sat,
-        max_iter):
-    """
-    Iterative LQR with box constraints (1st order in dynamics, 2nd order in cost).
-
-    Notes:  1.  It is recommended to use 'jax_enable_x64' for iLQR.
-            2.  Slew bounds must account for the rate from the control guess.
-
-    :param x_init: Initial state
-    :param tx_guess: Shape is (time, state)
-    :param tu_guess: Shape is (time, control)
-    :param model_fn: Model dynamics. Mapping z[t] -> z[t+1]
-    :param linearize_model: Linearized model dynamics. Mapping z[t] -> A[t]
-    :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals
-    :param quadraticize_cost: Quadraticized cost function. Mapping z[0:H-1] -> Q[0:H-1], j[0:H-1]
-    :param u_sat: Control saturation.
-    :param du_sat: Slew rate.
-    :param max_iter: Maximumum number of iLQR steps.
-    :return: The optimal trajectory, z[0:H]. A zero control is appended alongside the terminal state, z[H].
-    """
-    local_iteration = jax.tree_util.Partial(iteration_lqr,
-                                            **{'x_init': x_init,
-                                               'model_fn': model_fn,
-                                               'linear_model_fn': linearize_model,
-                                               'cost_fn': cost_fn,
-                                               'approx_cost': quadraticize_cost,
-                                               'u_sat': u_sat,
-                                               'du_sat': du_sat})
-    (tx, tu), steps = jax.lax.scan(local_iteration, (tx_guess, tu_guess), None, length=max_iter)
-    return jnp.concatenate([tx, jnp.vstack([tu, jnp.zeros(tu.shape[1])])], axis=1)
+from .solver import register
 
 
+@register("iLQR")
 def iteration_lqr(
         carry,
         iteration,
         x_init,
+        u_init,
         model_fn,
         linear_model_fn,
         cost_fn,
@@ -60,7 +18,10 @@ def iteration_lqr(
         u_sat,
         du_sat):
     """
-    Single LQR iteration.
+    Iterative LQR with box constraints (1st order in dynamics, 2nd order in cost).
+
+    Notes:  1.  It is recommended to use 'jax_enable_x64' for iLQR.
+            2.  Slew bounds must account for the rate from the control guess.
     """
     tx_guess, tu_guess = carry
 

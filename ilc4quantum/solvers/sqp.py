@@ -1,4 +1,3 @@
-import functools
 import jax
 from jax.experimental import sparse
 import jax.numpy as jnp
@@ -7,57 +6,15 @@ from jax.scipy.linalg import block_diag
 from jaxopt import BacktrackingLineSearch, BoxOSQP
 from scipy.optimize import line_search as sp_line_search
 
-sqp_static_args = ['max_iter', 'model_fn', 'linearize_model', 'cost_fn', 'quadraticize_cost']
+from .solver import register
 
 
-@functools.partial(jax.jit, static_argnames=sqp_static_args)
-def sqp(
-        x_init,
-        tx_guess,
-        tu_guess,
-        model_fn,
-        linearize_model,
-        cost_fn,
-        quadraticize_cost,
-        u_sat,
-        du_sat,
-        max_iter):
-    """
-    Sequential quadratic program.
-
-    Notes:  1.  It is not necessary to use 'jax_enable_x32' for SQP.
-            2.  It is important to have variables like max_iter last (else: "non-hashable static args...")
-            
-    :param x_init: Initial state
-    :param tx_guess: Shape is (time, state)
-    :param tu_guess: Shape is (time, control)
-    :param model_fn: Model dynamics. Mapping z[t] -> z[t+1].
-    :param linearize_model: Linearized model dynamics. Mapping z[t] -> A[t].
-    :param cost_fn: Cost function (no terminal state cost). Mapping z[0:H-1] -> Reals.
-    :param quadraticize_cost: Linearized cost function. Mapping z[0:H-1] -> Q[0:H-1], J[0:H-1].
-    :param u_sat: Control saturation.
-    :param du_sat: Slew rate.
-    :param max_iter: Maximumum number of SQP steps.
-    :return: The optimal trajectory, z[0:H]. A zero control is appended alongside the terminal state, z[H].
-    """
-    local_iteration = jax.tree_util.Partial(iteration_sqp,
-                                            **{'x_init': x_init,
-                                               'model_fn': model_fn,
-                                               'linear_model_fn': linearize_model,
-                                               'cost_fn': cost_fn,
-                                               'approx_cost': quadraticize_cost,
-                                               'u_sat': u_sat,
-                                               'du_sat': du_sat})
-
-    # Scan
-    (tx, tu), steps = jax.lax.scan(local_iteration, (tx_guess, tu_guess), None, length=max_iter)
-    return jnp.concatenate([tx, jnp.vstack([tu, jnp.zeros(tu.shape[1])])], axis=1)
-
-
+@register("SQP")
 def iteration_sqp(
         carry,
         scan,
         x_init,
+        u_init,
         model_fn,
         linear_model_fn,
         cost_fn,
@@ -65,10 +22,11 @@ def iteration_sqp(
         u_sat,
         du_sat):
     """
-    Single QP iteration.
+    Single quadratic program iteration.
 
     Notes:  1.  Parameterized functions should be wrapped using jax.tree_util.Partial or declared as static args.
                 (See jax/issues/1443)
+            2.  It is not necessary to use 'jax_enable_x32' for SQP.
     """
     tx_guess, tu_guess = carry
 
