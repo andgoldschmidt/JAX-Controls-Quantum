@@ -31,8 +31,7 @@ def iteration_lqr(
     tz_guess = jnp.concatenate([tx_guess, jnp.vstack([tu_guess, jnp.zeros(n_ctrl)])], axis=1)
 
     # Accumulated slew
-    # TODO: Initial slew?
-    slew_init = jnp.zeros(n_ctrl)
+    slew_init = tu_guess[0] - u_init
     tu_guess_slew = jnp.vstack([slew_init[None], tu_guess[1:] - tu_guess[:-1]])
 
     # 1. Compute derivatives

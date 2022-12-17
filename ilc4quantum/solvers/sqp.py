@@ -45,6 +45,7 @@ def iteration_sqp(
     # Solve QP
     tx_dx_opt, tu_dus_opt = quad_program(
         x_init=x_init,
+        u_init=u_init,
         tx_g=tx_guess,
         tu_g=tu_guess,
         tF_lin=tF_linear,
@@ -101,6 +102,7 @@ def static_line_search(tz_guess, tz_dz_opt, cost_fn, maxiter=20):
 
 def quad_program(
         x_init,
+        u_init,
         tx_g,
         tu_g,
         tF_lin,
@@ -134,15 +136,27 @@ def quad_program(
     tJ_final = jnp.zeros_like(tj_cost[-1, :n_state])
     q_qp = jnp.hstack([tj_cost.flatten(), tJ_final])
 
-    # - initial condition: dxs[0] == x_init - xs_g[0]
+    # - initial condition: dx[0] == x_init - x_g[0]
     # TODO: Allow for initial control specification?
-    I_eq = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_horiz * (n_state + n_ctrl)))])
-    nse_I_eq = n_state
-    lo_eq_init = x_init - tx_g[0]
-    up_eq_init = lo_eq_init
+    I_x_init = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_horiz * (n_state + n_ctrl)))])
+    nse_I_x_eq = n_state
+    lo_x_init = x_init - tx_g[0]
+    up_x_init = lo_x_init
 
-    # - linear dynamics: dxs[t+1] == F dzs[t] + rs[t]
-    # dxs[t+1] = S dzs[t]
+    # - initial slew:
+    # u[0] - u_init <= du_sat --> u[0] - u_g[0] + u_g[0] - u_init <= du_sat --> du[0] = du_sat - slew_init
+    # -(u[0] - u_init) <= du_sat --> du[0] >= -(du_sat + slew_init)
+    slew_init = tu_g[0] - u_init
+    I_u_init = jnp.hstack([
+        jnp.zeros((n_ctrl, n_state)), jnp.eye(n_ctrl),
+        jnp.zeros((n_ctrl, (n_horiz - 1) * (n_state + n_ctrl))), jnp.zeros((n_ctrl, n_state))
+    ])
+    nse_I_u_ineq = n_ctrl
+    lo_u_init = -(du_sat + slew_init)
+    up_u_init = du_sat - slew_init
+
+    # - linear dynamics: dx[t+1] == F dz[t] + r[t]
+    # dx[t+1] = S dz[t]
     id_x = jnp.hstack([jnp.eye(n_state), jnp.zeros((n_state, n_ctrl))])
     S_eq = jnp.hstack([
         jnp.zeros((n_horiz * n_state, n_state + n_ctrl)),
@@ -150,7 +164,7 @@ def quad_program(
     ])
     # F dzs[t]
     F_eq = jnp.hstack([block_diag(*tF_lin), jnp.zeros((n_state * n_horiz, n_state))])
-    # (S - F) dzs[t] := dxs[t+1] - F dzs[t]
+    # (S - F) dz[t] := dx[t+1] - F dz[t]
     A_eq = S_eq - F_eq
     nse_A_eq = n_horiz * (n_state + n_ctrl) ** 2 + n_state ** 2
     lo_eq = tr_feas.flatten()
@@ -190,16 +204,19 @@ def quad_program(
     nse_A_ineq_slew = 2 * n_ctrl * (n_horiz - 1)
 
     # - OSQP constraints
-    A_qp = jnp.vstack([I_eq, A_eq, A_ineq_sat, A_ineq_slew])
-    lo_qp = jnp.hstack([lo_eq_init, lo_eq, lo_ineq_sat, lo_ineq_slew])
-    up_qp = jnp.hstack([up_eq_init, up_eq, up_ineq_sat, up_ineq_slew])
+    A_qp = jnp.vstack([I_x_init, I_u_init, A_eq, A_ineq_sat, A_ineq_slew])
+    lo_qp = jnp.hstack([lo_x_init, lo_u_init, lo_eq, lo_ineq_sat, lo_ineq_slew])
+    up_qp = jnp.hstack([up_x_init, up_u_init, up_eq, up_ineq_sat, up_ineq_slew])
 
     # - OSQP Solve
     # If required the algorithm can be sped up by setting check_primal_dual_infeasability to False,
     # and by setting eq_qp_preconditioner to "jacobi" (when possible).
     prob = BoxOSQP(matvec_Q=sparse_matvec, matvec_A=sparse_matvec)
     sp_P_qp = sparse.BCOO.fromdense(P_qp, nse=nse_P_qp)
-    sp_A_qp = sparse.BCOO.fromdense(A_qp, nse=nse_I_eq + nse_A_eq + nse_A_ineq_sat + nse_A_ineq_slew)
+    sp_A_qp = sparse.BCOO.fromdense(
+        A_qp,
+        nse=nse_I_x_eq + nse_I_u_ineq + nse_A_eq + nse_A_ineq_sat + nse_A_ineq_slew
+    )
     params, state = prob.run(params_obj=(sp_P_qp, q_qp), params_eq=sp_A_qp, params_ineq=(lo_qp, up_qp))
 
     # params.primal[0] = [dx(0),du(0),dx(1),du(1),...,dx(H-1),du(H-1),dx(H)
