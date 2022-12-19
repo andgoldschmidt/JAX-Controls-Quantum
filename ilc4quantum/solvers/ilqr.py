@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jaxopt import BoxCDQP
+from jaxopt import BoxCDQP, BacktrackingLineSearch
 
 from .solver import register
 
@@ -19,6 +19,10 @@ def iteration_lqr(
         du_sat):
     """
     Iterative LQR with box constraints (1st order in dynamics, 2nd order in cost).
+
+    Read more:
+    * 10.1109/ICRA.2014.6907001
+    *
 
     Notes:  1.  It is recommended to use 'jax_enable_x64' for iLQR.
             2.  Slew bounds must account for the rate from the control guess.
@@ -54,68 +58,106 @@ def iteration_lqr(
     feedforwards, Feedbacks, delta_V1s, delta_V2s = feeds
 
     # 3. Forward pass
-    # -- Line search parameters
-    min_step = 1e-3
-    cost_guess = cost_fn(tz_guess[1:])
-    wolfe_c1 = 0.0001
-    dcost_lin = jnp.sum(delta_V1s, axis=0)
-    # wolfe_c2 = 0.9
-    # dcost_quad = jnp.sum(delta_V2s, axis=0)
-
-    local_cond_fn = jax.tree_util.Partial(
-        cond_fn,
+    forward_pass_step = jax.tree_util.Partial(
+        forward_pass,
+        tz_guess=tz_guess,
+        tu_feedforward=feedforwards,
+        tux_Feedback=Feedbacks,
         x_init=x_init,
-        scan=(tz_guess[:-1], tu_guess_slew, feedforwards, Feedbacks),
-        u_sat=u_sat,
-        du_sat=du_sat,
+        u_init=u_init,
         model_fn=model_fn,
-        cost_fn=cost_fn,
-        cost_guess=cost_guess,
-        dcost_lin=dcost_lin,
-        wolfe_c1=wolfe_c1,
-        min_step=min_step
-    )
+        u_sat=u_sat,
+        du_sat=du_sat)
 
-    # TODO: How to improve the n_eval here?
-    step = jax.lax.while_loop(local_cond_fn, body_fn, 1.)
-    step = jnp.where(step <= min_step, 0., step)
-    x_end, zs_opt = jax.lax.scan(
-        jax.tree_util.Partial(scan_forward, step=step, u_sat=u_sat, du_sat=du_sat, model_fn=model_fn),
-        x_init,
-        (tz_guess[:-1], tu_guess_slew, feedforwards, Feedbacks)
-    )
-    xs_guess_next = jnp.vstack([zs_opt[:, :n_state], x_end])
-    us_guess_next = zs_opt[:, -n_ctrl:]
-    return (xs_guess_next, us_guess_next), step
+    # -- Line search parameters
+    # cost_guess = cost_fn(tz_guess[1:])
+    # # wolfe_c1 = 0.0001
+    # dcost_lin = jnp.sum(delta_V1s, axis=0)
+    # # wolfe_c2 = 0.9
+    # # dcost_quad = jnp.sum(delta_V2s, axis=0)
+    # step = jax.lax.while_loop(
+    #     jax.tree_util.Partial(backtracking_line_search,
+    #                           forward_pass_step=forward_pass_step,
+    #                           cost_fn=cost_fn,
+    #                           cost_guess=cost_guess,
+    #                           dcost_lin=dcost_lin),
+    #     body_fn,
+    #     1.
+    # )
+    # TODO: I get better results taking a full step than I do following the line search. Why?
+    step = 1.
+
+    # -- Take step
+    (x_end, _), tz_opt = forward_pass_step(step)
+    tx_next = jnp.vstack([tz_opt[:, :n_state], x_end])
+    tu_next = tz_opt[:, -n_ctrl:]
+    return (tx_next, tu_next), step
 
 
-def cond_fn(s, x_init, scan, u_sat, du_sat, model_fn, cost_fn, cost_guess, dcost_lin, wolfe_c1, min_step):
-    # scan = (zs_guess[:-1], feedforwards, Feedbacks)
-    _, zs = jax.lax.scan(
-        jax.tree_util.Partial(scan_forward, step=s, u_sat=u_sat, du_sat=du_sat, model_fn=model_fn), x_init, scan
-    )
-    armijo_cond = (s > min_step) & (cost_fn(zs) > cost_guess + wolfe_c1 * s * dcost_lin)
+def backtracking_line_search(
+        step,
+        forward_pass_step,
+        cost_fn,
+        cost_guess,
+        dcost_lin,
+        min_step=1e-5,
+        wolfe_c1=1e-4):
+    """
+    The backtracking line search starts begins with an appropriate initial step length (like 1 for Newton's method).
+    The algorithm greedily checks for satisfaction of the Armijo sufficient decrease condition.
+
+    :param step: The step size, u + step * f + F dx
+    :param forward_pass_step: Partial function mapping: step --> (x_end, u_end), tz_opt
+    :param cost_fn:
+    :param cost_guess:
+    :param dcost_lin:
+    :param min_step: Smallest allowed step size
+    :param wolfe_c1: Armijo (sufficient decrease) condition
+    :return: True if step satisifies the backtracking line search. Else false.
+    """
+    _, zs = forward_pass_step(step)
+    # -- Backtracking line search: Exit when true.
+    armijo_cond = (step > min_step) & (cost_fn(zs) > cost_guess + wolfe_c1 * step * dcost_lin)
     return armijo_cond
 
 
 # TODO: What discount rate?
-def body_fn(s, discount=0.5):
+def body_fn(s, discount=0.8):
     return s * discount
 
 
-def scan_forward(x, scan, step, u_sat, du_sat, model_fn):
-    z_guess, u_guess_slew, feedforward, Feedback = scan
+def forward_pass(
+        step,
+        tz_guess,
+        tu_feedforward,
+        tux_Feedback,
+        x_init,
+        u_init,
+        model_fn,
+        u_sat,
+        du_sat):
+    """
+    Run `scan_forward` for a fixed step size. We use this to construct `forward_pass_step` based on the results of the
+    backward iteration.
+    """
+    return jax.lax.scan(
+        jax.tree_util.Partial(scan_forward, step=step, u_sat=u_sat, du_sat=du_sat, model_fn=model_fn),
+        (x_init, u_init),
+        (tz_guess[:-1], tu_feedforward, tux_Feedback)
+    )
+
+
+def scan_forward(carry, scan, step, u_sat, du_sat, model_fn):
+    x, u_prev = carry
+    z_guess, feedforward, Feedback = scan
     n_ctrl, n_state = Feedback.shape
 
-    # Clip
-    # TODO: Is |fwd| <= du_sat? Would Feedback ever exceed clip?
-    du = jnp.clip(
-        step * feedforward + Feedback @ (x - z_guess[:n_state]),
-        a_min=-jnp.minimum(du_sat + u_guess_slew, u_sat + z_guess[-n_ctrl:]),
-        a_max=jnp.minimum(du_sat - u_guess_slew, u_sat - z_guess[-n_ctrl:])
-    )
-    z = jnp.hstack((x, z_guess[-n_ctrl:] + du))
-    return model_fn(z), z
+    # Clip on slew and saturation
+    #  -- This is naive clamping, but in the backward pass 1. feedforward is constrained, and 2. Feedback is zeroed
+    #     along any constrained dimensions.
+    u = z_guess[-n_ctrl:] + step * feedforward + Feedback @ (x - z_guess[:n_state])
+    u = jnp.clip(u, a_min=jnp.maximum(u_prev - du_sat, -u_sat), a_max=jnp.minimum(du_sat + u_prev, u_sat))
+    return (model_fn(x, u), u), jnp.hstack((x, u))
 
 
 def scan_backward(carry, scan, mu, u_sat, du_sat, prob):
@@ -126,7 +168,7 @@ def scan_backward(carry, scan, mu, u_sat, du_sat, prob):
     n_state = len(next_V_x)
 
     # 1. Approximate the Bellman value function
-    # TODO: Make this DDP for faster convergence
+    # TODO: Make this DDP for faster convergence (requires F_ij)
     F_x = F_linear[:, :n_state]
     F_u = F_linear[:, -n_ctrl:]
     Q_u = J_cost[-n_ctrl:] + F_u.T @ next_V_x
@@ -140,13 +182,15 @@ def scan_backward(carry, scan, mu, u_sat, du_sat, prob):
     # -- Control inequality constraints.
     du_min = -jnp.minimum(du_sat + u_guess_slew, u_sat + u_guess)
     du_max = jnp.minimum(du_sat - u_guess_slew, u_sat - u_guess)
-    # -- Solve the box QP (warm start with prev. step) (fwd = -Q_uu_inv @ Q_u)
+    # -- Solve the box QP (warm start with prev. step) (unconstrained, fwd = -Q_uu_inv @ Q_u)
     fwd, state = prob.run(next_fwd, params_obj=(Q_uu, Q_u), params_ineq=(du_min, du_max))
 
     # 3. Compute Feedback
-    # -- Feedback for free controls. Zero for clamped.
-    clamped = jnp.repeat(((fwd <= du_min) | (fwd >= du_max))[:, None], n_state, axis=1)
-    Bwd = jnp.where(clamped, jnp.zeros((n_ctrl, n_state)), -jnp.linalg.pinv(Q_uu) @ Q_ux)
+    # -- Construct a boolean (n_ctrl, n_state) feedback block using the clamp condition.
+    tol = 1e-6
+    clamped = jnp.repeat(((fwd - tol <= du_min) | (fwd + tol >= du_max))[:, None], n_state, axis=1)
+    # --  Zero feedback for clamped controls. Original feedback for free controls.
+    Bwd = jnp.where(clamped, jnp.zeros((n_ctrl, n_state)), -jnp.linalg.solve(Q_uu, Q_ux))
 
     # 4. Backward update for the value
     delta_V1 = fwd.T @ Q_u
