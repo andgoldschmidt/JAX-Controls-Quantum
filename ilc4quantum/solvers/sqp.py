@@ -12,10 +12,11 @@ from .solver import register
 @register("SQP")
 def iteration_sqp(
         carry,
-        scan,
+        iteration,
         x_init,
         u_init,
         model_fn,
+        rollout_fn,
         linear_model_fn,
         cost_fn,
         approx_cost,
@@ -23,6 +24,8 @@ def iteration_sqp(
         du_sat):
     """
     Single quadratic program iteration.
+
+    The rollout function is not used.
 
     Notes:  1.  Parameterized functions should be wrapped using jax.tree_util.Partial or declared as static args.
                 (See jax/issues/1443)

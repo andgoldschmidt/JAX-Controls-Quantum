@@ -47,7 +47,7 @@ def solver(
             model is accessible; within the solver (e.g. linearization, line search, feedback) `model_fn` is used.
             Rollout_fn must call as f(x,u) and not as f(z) because unpacking z results in erros, either for
             `Non-hashable static arguments...` or `Array slice indices must have static start/stop/step...`
-
+        3.  TODO: this can probably be simplified to a normal for loop to avoid finicky coding in the first iteration.
 
     :param name: Name of solver to use.
     :param x_init: Initial state.
@@ -69,6 +69,7 @@ def solver(
         'x_init': x_init,
         'u_init': u_init,
         'model_fn': model_fn,
+        'rollout_fn': rollout_fn,
         'linear_model_fn': linearize_model,
         'cost_fn': cost_fn,
         'approx_cost': quadraticize_cost,
