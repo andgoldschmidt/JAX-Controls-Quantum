@@ -25,11 +25,9 @@ def iteration_sqp(
     """
     Single quadratic program iteration.
 
-    The rollout function is not used.
-
     Notes:  1.  Parameterized functions should be wrapped using jax.tree_util.Partial or declared as static args.
                 (See jax/issues/1443)
-            2.  It is not necessary to use 'jax_enable_x32' for SQP.
+            2.  It is not necessary to use 'jax_enable_x32' for SQP, which can be slower.
     """
     tx_guess, tu_guess = carry
 
@@ -64,7 +62,7 @@ def iteration_sqp(
     # TODO: Cost function has no final state cost.
     step = traced_line_search(tz_guess[:-1], tz_dz_opt[:-1], cost_fn)
     tz_guess = tz_guess + step * tz_dz_opt
-    return (tz_guess[:, :n_state], tz_guess[:-1, -n_ctrl:]), step
+    return (tz_guess[:, :n_state], tz_guess[:-1, -n_ctrl:]), (step, jnp.max(tu_dus_opt, axis=0))
 
 
 def full_search(tz_guess, tz_dz_opt, cost_fn):

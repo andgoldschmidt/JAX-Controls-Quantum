@@ -21,7 +21,6 @@ def iteration_box_lqr(
     """
     Iterative LQR with box constraints (1st order in dynamics, 2nd order in cost).
 
-    The rollout function must be directly applied within iLQR for ILC applications because of the state-feedback component in the controller.
 
     Read more:  *  10.1109/IROS.2012.6386025
                 *  10.1109/ICRA.2014.6907001
@@ -29,6 +28,9 @@ def iteration_box_lqr(
     Notes:  1.  It can sometimes be important to enable 'jax_enable_x64' for iLQR.
             2.  Slew bounds must account for the rate from the control guess.
             3.  TODO: Gradient information and step should inform convergence / exit.
+            4.  There is a state feedback component to this controller. Therefore, the rollout function needs to be applied directly
+                within iLQR for any ILC applications. One might alteratively consider using the reference state to provide feedback, 
+                but this does not work.
     """
     tx_guess, tu_guess = carry
 
@@ -96,9 +98,15 @@ def iteration_box_lqr(
     # step = 1.
 
     # -- Take step
-    (x_end, _), tz_opt = rollout_step(step)
+    # NOTE: This was a test of using the reference state as the feedback (idea: x -> x_ref, eventually). It didn't work.
+    # tu_step = tu_guess + step * tu_feedforward + jnp.einsum("tux,tx->tu", tux_Feedback, tx_ref[:-1] - tx_guess[:-1])
+    # tu_prev = jnp.concatenate([u_init[None], tu_step[:-1]], axis=0)
+    # tu_next = jax.lax.clamp(jnp.maximum(tu_prev - du_sat, -u_sat), tu_step, jnp.minimum(du_sat + tu_prev, u_sat))
+
+    (x_end, _), tz_opt = model_step(step)
     tx_next = jnp.vstack([tz_opt[:, :n_state], x_end])
     tu_next = tz_opt[:, -n_ctrl:]
+
     return (tx_next, tu_next), (step, jnp.max(tu_feedforward, axis=0))
 
 
