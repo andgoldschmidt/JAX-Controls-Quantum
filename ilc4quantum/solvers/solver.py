@@ -87,6 +87,7 @@ def solver(
     solver_iteration = jax.tree_util.Partial(methods.get(name), **solver_kwargs)
 
     def rollout_decorator(carry, scan):
+        """ Can be used to add noise or other challenges to readout data. """
         (_, next_tu), step = solver_iteration(carry, scan)
         rollout_next_tx = solve_ivp(x_init, next_tu, rollout_fn)
         return (rollout_next_tx, next_tu), step
@@ -179,6 +180,5 @@ def model_discovery_solver(
             A_op=fit_model_split(tx2_buffer, tx1_buffer, tu_buffer, control_powers, dmd_rank),
             powers=control_powers
         )
-
 
     return jnp.concatenate([tx, jnp.vstack([tu, jnp.zeros(tu.shape[1])])], axis=1), steps

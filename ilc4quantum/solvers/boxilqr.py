@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jaxopt import BoxCDQP, BacktrackingLineSearch
 
+from .ilqr import backtracking_line_search, discount_fn, forward_pass, scan_forward
 from .solver import register
 
 
@@ -63,14 +64,14 @@ def iteration_box_lqr(
 
     # 3. Forward pass
     # -- Separate pass for model (linesearch) and rollout (optimization)
-    model_partial = jax.tree_util.Partial(scan_box_forward, u_sat=u_sat, du_sat=du_sat, model_fn=model_fn)
+    model_partial = jax.tree_util.Partial(scan_forward, u_sat=u_sat, du_sat=du_sat, model_fn=model_fn)
     model_step = jax.tree_util.Partial(
         forward_pass, 
         scan_forward_step=model_partial, 
         carry_init=(x_init, u_init), 
         scan=(tz_guess[:-1], tu_feedforward, tux_Feedback))
 
-    rollout_partial = jax.tree_util.Partial(scan_box_forward, u_sat=u_sat, du_sat=du_sat, model_fn=rollout_fn)
+    rollout_partial = jax.tree_util.Partial(scan_forward, u_sat=u_sat, du_sat=du_sat, model_fn=rollout_fn)
     rollout_step = jax.tree_util.Partial(
         forward_pass, 
         scan_forward_step=rollout_partial, 
@@ -91,7 +92,7 @@ def iteration_box_lqr(
                               cost_fn=cost_fn,
                               cost_guess=cost_guess,
                               dcost_lin=dcost_lin),
-        body_fn,
+        discount_fn,
         1.
     )
     # # TODO: I sometimes get better results taking a full step than I do following the line search. Why?
@@ -102,69 +103,11 @@ def iteration_box_lqr(
     # tu_step = tu_guess + step * tu_feedforward + jnp.einsum("tux,tx->tu", tux_Feedback, tx_ref[:-1] - tx_guess[:-1])
     # tu_prev = jnp.concatenate([u_init[None], tu_step[:-1]], axis=0)
     # tu_next = jax.lax.clamp(jnp.maximum(tu_prev - du_sat, -u_sat), tu_step, jnp.minimum(du_sat + tu_prev, u_sat))
-
-    (x_end, _), tz_opt = model_step(step)
+    (x_end, _), tz_opt = rollout_step(step)
     tx_next = jnp.vstack([tz_opt[:, :n_state], x_end])
     tu_next = tz_opt[:, -n_ctrl:]
 
     return (tx_next, tu_next), (step, jnp.max(tu_feedforward, axis=0))
-
-
-def backtracking_line_search(
-        step,
-        forward_pass_step,
-        cost_fn,
-        cost_guess,
-        dcost_lin,
-        min_step=1e-5,
-        wolfe_c1=1e-4):
-    """
-    The backtracking line search starts begins with an appropriate initial step length (like 1 for Newton's method).
-    The algorithm greedily checks for satisfaction of the Armijo sufficient decrease condition.
-
-    :param step: The step size, u + step * f + F dx
-    :param forward_pass_step: Partial function mapping: step --> (x_end, u_end), tz_opt
-    :param cost_fn:
-    :param cost_guess:
-    :param dcost_lin:
-    :param min_step: Smallest allowed step size
-    :param wolfe_c1: Armijo (sufficient decrease) condition
-    :return: True if step satisifies the backtracking line search. Else false.
-    """
-    _, tz_step = forward_pass_step(step)
-    # -- Backtracking line search: Exit when true.
-    armijo_cond = (step > min_step) & (cost_fn(tz_step) > cost_guess + wolfe_c1 * step * dcost_lin)
-    return armijo_cond
-
-
-# TODO: What discount rate?
-def body_fn(s, discount=0.8):
-    return s * discount
-
-
-def forward_pass(
-        step,
-        scan_forward_step,
-        carry_init,
-        scan):
-    """
-    Run `scan_forward` for a fixed step size. We use this to construct `forward_pass_step` based on the results of the
-    backward iteration---this is an argument in the `backtracking_line_search` function.
-    """
-    return jax.lax.scan(jax.tree_util.Partial(scan_forward_step, step=step), carry_init, scan)
-
-
-def scan_box_forward(carry, scan, step, u_sat, du_sat, model_fn):
-    x, u_prev = carry
-    z_guess, feedforward, Feedback = scan
-    n_ctrl, n_state = Feedback.shape
-
-    # Clip on slew and saturation
-    #  -- This is naive clamping, except that in the backward pass: 1. feedforward is constrained, and 2. Feedback is zeroed
-    #     along any constrained dimensions.
-    u = z_guess[-n_ctrl:] + step * feedforward + Feedback @ (x - z_guess[:n_state])
-    u = jnp.clip(u, a_min=jnp.maximum(u_prev - du_sat, -u_sat), a_max=jnp.minimum(du_sat + u_prev, u_sat))
-    return (model_fn(x, u), u), jnp.hstack((x, u))
 
 
 def scan_box_backward(carry, scan, mu, u_sat, du_sat, prob):

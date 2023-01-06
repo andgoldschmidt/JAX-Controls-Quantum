@@ -99,8 +99,9 @@ def dmd_model(x, u, A_op, powers):
     return A_op @ create_lifted_state_variable(x, u, powers)
 
 
-def dmd_discrepancy_model(x, u, A_op, powers, x_guess, u_guess, prev_model):
-    """
-    JAX-differentiable DMD model.
-    """
-    return prev_model(x, u) + A_op @ create_lifted_state_variable(x - x_guess, u - u_guess, powers)
+# def dmd_discrepancy_model(x, u, A_op, powers, x_guess, u_guess, prev_model):
+#     """
+#     JAX-differentiable DMD model. 
+#     TODO: How to incoprorate into control framework? Is this any better than prev.?
+#     """
+#     return prev_model(x, u) + A_op @ create_lifted_state_variable(x - x_guess, u - u_guess, powers)

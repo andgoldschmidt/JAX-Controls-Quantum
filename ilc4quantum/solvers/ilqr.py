@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 
 from .solver import register
-from .boxilqr import backtracking_line_search, body_fn, forward_pass
 
 
 @register("iLQR")
@@ -21,7 +20,7 @@ def iteration_lqr(
     """
         Run iterative LQR (1st order in dynamics, 2nd order in cost).
 
-        Notes:  1.  TODO: We can put the slew and saturation into the cost function by changing the definition of the state,
+        Notes:  1.  NOTE/TODO: We can put the slew and saturation into the cost function by changing the definition of the state,
                     and using cost matrices to make the constraint.
 
         Read more:  *  10.1109/IROS.2012.6386025
@@ -74,7 +73,7 @@ def iteration_lqr(
                               cost_fn=cost_fn,
                               cost_guess=cost_guess,
                               dcost_lin=dcost_lin),
-        body_fn,
+        discount_fn,
         1.
     )
     # step = 1.
@@ -127,3 +126,47 @@ def scan_forward(carry, scan, step, u_sat, du_sat, model_fn):
     u = z_guess[-n_ctrl:] + step * feedforward + Feedback @ (x - z_guess[:n_state])
     u = jnp.clip(u, a_min=jnp.maximum(u_prev - du_sat, -u_sat), a_max=jnp.minimum(du_sat + u_prev, u_sat))
     return (model_fn(x, u), u), jnp.hstack((x, u))
+
+
+def forward_pass(
+        step,
+        scan_forward_step,
+        carry_init,
+        scan):
+    """
+    Run `scan_forward` for a fixed step size. We use this to construct `forward_pass_step` based on the results of the
+    backward iteration---this is an argument in the `backtracking_line_search` function.
+    """
+    return jax.lax.scan(jax.tree_util.Partial(scan_forward_step, step=step), carry_init, scan)
+
+
+def backtracking_line_search(
+        step,
+        forward_pass_step,
+        cost_fn,
+        cost_guess,
+        dcost_lin,
+        min_step=1e-5,
+        wolfe_c1=1e-4):
+    """
+    The backtracking line search starts begins with an appropriate initial step length (like 1 for Newton's method).
+    The algorithm greedily checks for satisfaction of the Armijo sufficient decrease condition.
+
+    :param step: The step size, u + step * f + F dx
+    :param forward_pass_step: Partial function mapping: step --> (x_end, u_end), tz_opt
+    :param cost_fn:
+    :param cost_guess:
+    :param dcost_lin:
+    :param min_step: Smallest allowed step size
+    :param wolfe_c1: Armijo (sufficient decrease) condition
+    :return: True if step satisifies the backtracking line search. Else false.
+    """
+    _, tz_step = forward_pass_step(step)
+    # -- Backtracking line search: Exit when true.
+    armijo_cond = (step > min_step) & (cost_fn(tz_step) > cost_guess + wolfe_c1 * step * dcost_lin)
+    return armijo_cond
+
+
+def discount_fn(s, discount=0.8):
+    # TODO: What discount rate?
+    return s * discount
