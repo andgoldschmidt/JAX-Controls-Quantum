@@ -109,6 +109,9 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# vscode
+*.code-workspace
+
 # Large files
 .obj/
 

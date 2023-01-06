@@ -19,6 +19,10 @@ def ilc(
         du_sat=jnp.inf,
         solver_name='iLQR'):
     """
+    TODO: Construct a top-level ILC and MPC framework for comparison of the two approaches.
+    NOTE: For batch processes: MPC can be used as the first pass, but ILC should otherwise be favored.
+    NOTE: For tracking: Model discovery and re-planning is important if there are infeasible trajectories due to static model parameters.
+
     Iterative learning control (ILC) solves an optimal control problem using a standard control solver for planning. It assumes
     rollouts of the systems are accessible as a black box. In ILC, data from the rollouts are used to iteratively compute model
     linearizations and cost quadratizations.
@@ -46,7 +50,6 @@ def ilc(
     rollout = jax.tree_util.Partial(solve_ivp, model_fn=true_fn)
 
     # Find optimal control
-    # TODO: Write as a jax.lax.scan.
     replay_buffer = [None] * max_iter
     for i in tqdm(range(max_iter), total=max_iter):
         # Compute rollout

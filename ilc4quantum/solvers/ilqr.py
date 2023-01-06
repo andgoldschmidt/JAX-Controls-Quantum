@@ -41,7 +41,6 @@ def iteration_lqr(
     # 2. Backward pass
     V_x = tj_cost[-1, :n_state]
     V_xx = tH_cost[-1, :n_state, :n_state]
-    # TODO: Search mu?
     _, feeds = jax.lax.scan(jax.tree_util.Partial(scan_backward, mu=1e-9),
                             (V_x, V_xx),
                             (tu_guess, tj_cost, tH_cost, tF_linear),
@@ -86,6 +85,7 @@ def iteration_lqr(
 
 
 def scan_backward(carry, scan, mu):
+    # TODO: Search mu?
     next_V_x, next_V_xx = carry
     u_guess, J_cost, H_cost, F_linear = scan
     # Pay attention to shapes!
