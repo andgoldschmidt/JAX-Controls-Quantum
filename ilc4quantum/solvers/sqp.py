@@ -62,7 +62,7 @@ def iteration_sqp(
     # TODO: Cost function has no final state cost.
     step = traced_line_search(tz_guess[:-1], tz_dz_opt[:-1], cost_fn)
     tz_guess = tz_guess + step * tz_dz_opt
-    return (tz_guess[:, :n_state], tz_guess[:-1, -n_ctrl:]), (step, jnp.max(tu_dus_opt, axis=0))
+    return (tz_guess[:, :n_state], tz_guess[:-1, -n_ctrl:]), (step, jnp.max(jnp.abs(tu_dus_opt), axis=0))
 
 
 def full_search(tz_guess, tz_dz_opt, cost_fn):

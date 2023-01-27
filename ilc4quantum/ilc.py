@@ -21,11 +21,12 @@ def ilc(
     """
     TODO: Construct a top-level ILC and MPC framework for comparison of the two approaches.
     NOTE: For batch processes: MPC can be used as the first pass, but ILC should otherwise be favored.
-    NOTE: For tracking: Model discovery and re-planning is important if there are infeasible trajectories due to static model parameters.
+    NOTE: For tracking: Model discovery and re-planning is important if there are infeasible trajectories due to static
+          model parameters.
 
-    Iterative learning control (ILC) solves an optimal control problem using a standard control solver for planning. It assumes
-    rollouts of the systems are accessible as a black box. In ILC, data from the rollouts are used to iteratively compute model
-    linearizations and cost quadratizations.
+    Iterative learning control (ILC) solves an optimal control problem using a standard control solver for planning.
+    It assumes rollouts of the systems are accessible as a black box. In ILC, data from the rollouts are used to
+    iteratively compute model linearizations and cost quadratizations.
 
     :param x_init: The inital state.
     :param tu_guess: The initial control (usually an optimal control assuming the model is true).

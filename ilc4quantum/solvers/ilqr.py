@@ -20,8 +20,8 @@ def iteration_lqr(
     """
         Run iterative LQR (1st order in dynamics, 2nd order in cost).
 
-        Notes:  1.  NOTE/TODO: We can put the slew and saturation into the cost function by changing the definition of the state,
-                    and using cost matrices to make the constraint.
+        Notes:  1.  NOTE/TODO: We can put the slew and saturation into the cost function by changing the definition of
+                    the state, and using cost matrices to make the constraint.
 
         Read more:  *  10.1109/IROS.2012.6386025
     """
@@ -58,9 +58,9 @@ def iteration_lqr(
 
     rollout_partial = jax.tree_util.Partial(scan_forward, u_sat=u_sat, du_sat=du_sat, model_fn=rollout_fn)
     rollout_step = jax.tree_util.Partial(
-        forward_pass, 
-        scan_forward_step=rollout_partial, 
-        carry_init=(x_init, u_init), 
+        forward_pass,
+        scan_forward_step=rollout_partial,
+        carry_init=(x_init, u_init),
         scan=(tz_guess[:-1], tu_feedforward, tux_Feedback))
 
     # -- Line search parameters
@@ -81,7 +81,7 @@ def iteration_lqr(
     (x_end, _), tz_opt = rollout_step(step)
     tx_next = jnp.vstack([tz_opt[:, :n_state], x_end])
     tu_next = tz_opt[:, -n_ctrl:]
-    return (tx_next, tu_next), (step, jnp.max(tu_feedforward, axis=0))
+    return (tx_next, tu_next), (step, jnp.max(jnp.abs(tu_feedforward), axis=0))
 
 
 def scan_backward(carry, scan, mu):

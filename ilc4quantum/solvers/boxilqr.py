@@ -107,7 +107,7 @@ def iteration_box_lqr(
     tx_next = jnp.vstack([tz_opt[:, :n_state], x_end])
     tu_next = tz_opt[:, -n_ctrl:]
 
-    return (tx_next, tu_next), (step, jnp.max(tu_feedforward, axis=0))
+    return (tx_next, tu_next), (step, jnp.max(jnp.abs(tu_feedforward), axis=0))
 
 
 def scan_box_backward(carry, scan, mu, u_sat, du_sat, prob):

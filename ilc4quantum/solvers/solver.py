@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .ivp import solve_ivp
-from ..dynamics import create_power_list, dmd_model, dmd_discrepancy_model, lift_model, fit_model_split
+from ..dynamics import create_power_list, dmd_model, lift_model, fit_model_split
 from ..costs import quad_cost_fn, quadraticize_quad_cost
 
 
@@ -94,7 +94,6 @@ def solver(
 
     (tx, tu), steps = jax.lax.scan(rollout_decorator, (tx_guess, tu_guess), None, length=max_iter)
     return jnp.concatenate([tx, jnp.vstack([tu, jnp.zeros(tu.shape[1])])], axis=1), steps
-
 
 
 def model_discovery_solver(
